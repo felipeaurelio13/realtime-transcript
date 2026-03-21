@@ -5,17 +5,15 @@ export interface TranscriptBlock {
 }
 
 export interface SummaryShape {
-  executive_summary: string;
-  key_points: string[];
-  decisions: string[];
-  action_items: string[];
-  open_questions: string[];
+  content: string;
+}
+
+export interface SummaryRouteResponse extends SummaryShape {
+  fallback?: boolean;
+  warning?: string;
+  usage?: { input_tokens: number; output_tokens: number };
 }
 
 export const EMPTY_SUMMARY: SummaryShape = {
-  executive_summary: '',
-  key_points: [],
-  decisions: [],
-  action_items: [],
-  open_questions: []
+  content: ''
 };

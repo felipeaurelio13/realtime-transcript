@@ -1,4 +1,4 @@
-import { SummaryShape } from './types';
+import { EMPTY_SUMMARY, SummaryShape } from './types';
 
 export const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -8,19 +8,30 @@ export const uid = () =>
 export const parseSummaryResponse = (input: unknown): SummaryShape | null => {
   if (!input || typeof input !== 'object') return null;
   const maybe = input as Partial<SummaryShape>;
-
-  if (typeof maybe.executive_summary !== 'string') return null;
-  const toArray = (value: unknown) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-
-  return {
-    executive_summary: maybe.executive_summary,
-    key_points: toArray(maybe.key_points),
-    decisions: toArray(maybe.decisions),
-    action_items: toArray(maybe.action_items),
-    open_questions: toArray(maybe.open_questions)
-  };
+  if (typeof maybe.content !== 'string') return null;
+  return { content: maybe.content };
 };
 
-export const summaryToText = (summary: SummaryShape) =>
-  JSON.stringify(summary, null, 2);
+export const coerceSummaryShape = (input: unknown): SummaryShape => {
+  const parsed = parseSummaryResponse(input);
+  return parsed ?? EMPTY_SUMMARY;
+};
+
+export const buildFallbackSummary = (
+  previousSummary: SummaryShape,
+  newTranscript: string
+): SummaryShape => {
+  const sentences = newTranscript
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  const recent = sentences.slice(-5).join(' ');
+  const content = previousSummary.content
+    ? `${previousSummary.content}\n\n---\n\n(Resumen local provisional) ${recent}`
+    : `(Resumen local provisional) ${recent}`;
+
+  return { content };
+};
+
+export const summaryToText = (summary: SummaryShape) => summary.content;

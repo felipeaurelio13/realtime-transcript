@@ -20,13 +20,7 @@ describe('useLiveNotesStore', () => {
   });
 
   it('updates summary watermark and current summary', () => {
-    const summary = {
-      executive_summary: 'Resumen',
-      key_points: ['A'],
-      decisions: ['B'],
-      action_items: ['C'],
-      open_questions: []
-    };
+    const summary = { content: '## Resumen\n\nPuntos clave: A, B' };
 
     useLiveNotesStore.getState().setSummary(summary, 'texto');
     const next = useLiveNotesStore.getState();
@@ -38,11 +32,23 @@ describe('useLiveNotesStore', () => {
   it('resets to initial state', () => {
     useLiveNotesStore.getState().updateLiveDelta('data');
     useLiveNotesStore.getState().setStatus('recording');
+    useLiveNotesStore.getState().setErrorMessage('boom');
     useLiveNotesStore.getState().reset();
 
     const next = useLiveNotesStore.getState();
     expect(next.currentSummary).toEqual(EMPTY_SUMMARY);
     expect(next.status).toBe('idle');
+    expect(next.errorMessage).toBeNull();
     expect(next.liveTranscript).toBe('');
+  });
+
+  it('can preserve live text while committing a completed block', () => {
+    const store = useLiveNotesStore.getState();
+    store.setLiveTranscript('texto en curso');
+    store.commitLiveTranscript('bloque cerrado', { preserveLiveTranscript: true });
+
+    const next = useLiveNotesStore.getState();
+    expect(next.committedTranscript[0].text).toBe('bloque cerrado');
+    expect(next.liveTranscript).toBe('texto en curso');
   });
 });
