@@ -1,51 +1,59 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLiveNotesStore } from '@/store/livenotes-store';
-import { parseSummaryResponse } from '@/lib/utils';
 import { SummaryRouteResponse } from '@/lib/types';
+import { parseSummaryResponse } from '@/lib/utils';
 
-const MIN_NEW_CHARS = 60;
-const MIN_INTERVAL_MS = 3000;
-const HEARTBEAT_MS = 5000;
-const PAUSE_MS = 1500;
+const BASE_MIN_NEW_CHARS = 60;
+const MAX_MIN_NEW_CHARS = 250;
+const RAMP_DURATION_MS = 10 * 60 * 1000;
+const MIN_INTERVAL_MS = 2000;
+const HEARTBEAT_MS = 4000;
+const PAUSE_MS = 800;
+
+const getMinNewChars = (sessionStartedAt: number | null) => {
+  if (!sessionStartedAt) return BASE_MIN_NEW_CHARS;
+  const elapsed = Date.now() - sessionStartedAt;
+  const t = Math.min(elapsed / RAMP_DURATION_MS, 1);
+  return Math.round(BASE_MIN_NEW_CHARS + t * (MAX_MIN_NEW_CHARS - BASE_MIN_NEW_CHARS));
+};
 
 export const useIncrementalSummary = () => {
-  const fullTranscript = useLiveNotesStore((state) => state.fullTranscript);
-  const lastSummarizedText = useLiveNotesStore((state) => state.lastSummarizedText);
-  const currentSummary = useLiveNotesStore((state) => state.currentSummary);
-  const lastSummaryUpdateAt = useLiveNotesStore((state) => state.lastSummaryUpdateAt);
   const status = useLiveNotesStore((state) => state.status);
-  const contextPrompt = useLiveNotesStore((state) => state.contextPrompt);
-  const setSummary = useLiveNotesStore((state) => state.setSummary);
-  const setErrorMessage = useLiveNotesStore((state) => state.setErrorMessage);
-  const addSummaryCost = useLiveNotesStore((state) => state.addSummaryCost);
+  const fullTranscript = useLiveNotesStore((state) => state.fullTranscript);
+  const summarizedOffset = useLiveNotesStore((state) => state.summarizedOffset);
 
   const pendingRef = useRef(false);
   const previousStatusRef = useRef(status);
   const editDebounceRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
-  const nextDelta = useMemo(() => {
-    if (!fullTranscript.startsWith(lastSummarizedText)) {
-      return fullTranscript;
-    }
-    return fullTranscript.slice(lastSummarizedText.length).trimStart();
-  }, [fullTranscript, lastSummarizedText]);
-
   const refreshSummary = useCallback(
-    async (reason: 'pause' | 'heartbeat' | 'stop', options?: { force?: boolean }) => {
-      if (pendingRef.current || !nextDelta.trim()) return;
-      if (!options?.force && nextDelta.length < MIN_NEW_CHARS) return;
+    async (options?: { force?: boolean }) => {
+      if (pendingRef.current) return;
+
+      const state = useLiveNotesStore.getState();
+      const { fullTranscript: ft, summarizedOffset: offset, currentSummary, contextPrompt, sessionStartedAt, lastSummaryUpdateAt } = state;
+      const { setSummary, setErrorMessage, addSummaryCost } = state;
+
+      const delta = offset > ft.length ? ft : ft.slice(offset).trimStart();
+      if (!delta.trim()) return;
+
+      const minChars = getMinNewChars(sessionStartedAt);
+      if (!options?.force && delta.length < minChars) return;
       if (!options?.force && Date.now() - lastSummaryUpdateAt < MIN_INTERVAL_MS) return;
 
       pendingRef.current = true;
+      const capturedLength = ft.length;
+
       try {
         const response = await fetch('/api/summarize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            // Send the full shape so the API can extract sections
             previousSummary: JSON.stringify(currentSummary),
-            newTranscript: nextDelta,
+            newTranscript: delta,
             contextPrompt: contextPrompt || undefined,
           })
         });
@@ -58,7 +66,7 @@ export const useIncrementalSummary = () => {
         const data = (await response.json()) as SummaryRouteResponse;
         const parsed = parseSummaryResponse(data);
         if (parsed) {
-          setSummary(parsed, fullTranscript);
+          setSummary(parsed, capturedLength);
           setErrorMessage(data.warning ?? null);
           if (data.usage) {
             addSummaryCost(data.usage.input_tokens, data.usage.output_tokens);
@@ -68,46 +76,40 @@ export const useIncrementalSummary = () => {
         pendingRef.current = false;
       }
     },
-    [addSummaryCost, contextPrompt, currentSummary, fullTranscript, lastSummaryUpdateAt, nextDelta, setErrorMessage, setSummary]
+    []
   );
 
   useEffect(() => {
-    let heartbeatTimer: NodeJS.Timeout | undefined;
-    let pauseTimer: NodeJS.Timeout | undefined;
+    if (status !== 'recording') return;
 
-    if (status === 'recording') {
-      heartbeatTimer = setInterval(() => {
-        void refreshSummary('heartbeat');
-      }, HEARTBEAT_MS);
+    const heartbeatTimer = setInterval(() => {
+      void refreshSummary();
+    }, HEARTBEAT_MS);
 
-      pauseTimer = setTimeout(() => {
-        void refreshSummary('pause');
-      }, PAUSE_MS);
-    }
+    const pauseTimer = setTimeout(() => {
+      void refreshSummary();
+    }, PAUSE_MS);
 
     return () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      if (pauseTimer) clearTimeout(pauseTimer);
+      clearInterval(heartbeatTimer);
+      clearTimeout(pauseTimer);
     };
-  }, [refreshSummary, status]);
+  }, [refreshSummary, status, fullTranscript]);
 
   useEffect(() => {
     if (previousStatusRef.current === 'recording' && status === 'idle') {
-      void refreshSummary('stop', { force: true });
+      void refreshSummary({ force: true });
     }
-
     previousStatusRef.current = status;
   }, [refreshSummary, status]);
 
-  // Re-summarize when transcript is edited (lastSummarizedText resets to '')
   useEffect(() => {
-    if (lastSummarizedText === '' && fullTranscript.trim()) {
+    if (summarizedOffset === 0 && fullTranscript.trim()) {
       clearTimeout(editDebounceRef.current);
       editDebounceRef.current = setTimeout(() => {
-        void refreshSummary('stop', { force: true });
+        void refreshSummary({ force: true });
       }, 800);
     }
-
     return () => clearTimeout(editDebounceRef.current);
-  }, [fullTranscript, lastSummarizedText, refreshSummary]);
+  }, [fullTranscript, summarizedOffset, refreshSummary]);
 };

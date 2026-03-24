@@ -19,13 +19,13 @@ describe('useLiveNotesStore', () => {
     expect(next.liveTranscript).toBe('');
   });
 
-  it('updates summary watermark and current summary', () => {
+  it('updates summary offset and current summary', () => {
     const summary = { content: '## Resumen\n\nPuntos clave: A, B' };
 
-    useLiveNotesStore.getState().setSummary(summary, 'texto');
+    useLiveNotesStore.getState().setSummary(summary, 42);
     const next = useLiveNotesStore.getState();
     expect(next.currentSummary).toEqual(summary);
-    expect(next.lastSummarizedText).toBe('texto');
+    expect(next.summarizedOffset).toBe(42);
     expect(next.lastSummaryUpdateAt).toBeGreaterThan(0);
   });
 

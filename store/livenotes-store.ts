@@ -15,9 +15,12 @@ interface LiveNotesState extends CostState {
   liveTranscript: string;
   committedTranscript: TranscriptBlock[];
   fullTranscript: string;
-  lastSummarizedText: string;
+  /** Character offset up to which the transcript has been summarized (O(1) delta calc). */
+  summarizedOffset: number;
   currentSummary: SummaryShape;
   lastSummaryUpdateAt: number;
+  /** Timestamp when the first transcript block was committed (for adaptive batching). */
+  sessionStartedAt: number | null;
   setStatus: (status: 'idle' | 'recording') => void;
   setErrorMessage: (message: string | null) => void;
   setContextPrompt: (value: string) => void;
@@ -25,7 +28,7 @@ interface LiveNotesState extends CostState {
   updateLiveDelta: (delta: string) => void;
   commitLiveTranscript: (text?: string, options?: { preserveLiveTranscript?: boolean }) => void;
   updateBlock: (id: string, text: string) => void;
-  setSummary: (summary: SummaryShape, summarizedUntil: string) => void;
+  setSummary: (summary: SummaryShape, summarizedOffset: number) => void;
   startRecordingCost: () => void;
   stopRecordingCost: () => void;
   addSummaryCost: (inputTokens: number, outputTokens: number) => void;
@@ -44,9 +47,10 @@ const initialState = {
   liveTranscript: '',
   committedTranscript: [],
   fullTranscript: '',
-  lastSummarizedText: '',
+  summarizedOffset: 0,
   currentSummary: EMPTY_SUMMARY,
   lastSummaryUpdateAt: 0,
+  sessionStartedAt: null as number | null,
   transcriptionCost: 0,
   summaryCost: 0,
   recordingStartedAt: null as number | null
@@ -77,7 +81,8 @@ export const useLiveNotesStore = create<LiveNotesState>((set, get) => ({
     set((state) => ({
       liveTranscript: options?.preserveLiveTranscript ? state.liveTranscript : '',
       committedTranscript: [...state.committedTranscript, block],
-      fullTranscript: state.fullTranscript ? `${state.fullTranscript}\n${currentText}` : currentText
+      fullTranscript: state.fullTranscript ? `${state.fullTranscript}\n${currentText}` : currentText,
+      sessionStartedAt: state.sessionStartedAt ?? Date.now()
     }));
   },
   updateBlock: (id, text) =>
@@ -88,7 +93,7 @@ export const useLiveNotesStore = create<LiveNotesState>((set, get) => ({
       return {
         committedTranscript: blocks,
         fullTranscript: blocks.map((b) => b.text).join('\n'),
-        lastSummarizedText: ''
+        summarizedOffset: 0
       };
     }),
   startRecordingCost: () => set({ recordingStartedAt: Date.now() }),
@@ -116,10 +121,10 @@ export const useLiveNotesStore = create<LiveNotesState>((set, get) => ({
     }
     return transcription + state.summaryCost;
   },
-  setSummary: (summary, summarizedUntil) =>
+  setSummary: (summary, offset) =>
     set({
       currentSummary: summary,
-      lastSummarizedText: summarizedUntil,
+      summarizedOffset: offset,
       lastSummaryUpdateAt: Date.now()
     }),
   reset: () => set({ ...initialState })

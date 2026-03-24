@@ -23,10 +23,8 @@ describe('buildTranscriptionSession', () => {
     });
     expect(session.audio.input.noise_reduction).toEqual({ type: 'near_field' });
     expect(session.audio.input.turn_detection).toMatchObject({
-      type: 'server_vad',
-      threshold: 0.35,
-      prefix_padding_ms: 500,
-      silence_duration_ms: 400,
+      type: 'semantic_vad',
+      eagerness: 'medium',
       create_response: false,
       interrupt_response: false
     });

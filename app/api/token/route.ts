@@ -1,11 +1,14 @@
-import { NextResponse } from 'next/server';
-import { buildTranscriptionSession } from '@/lib/realtime';
+import { NextRequest, NextResponse } from 'next/server';
+import { buildTranscriptionSession, getPreferredTranscriptionLanguage } from '@/lib/realtime';
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'OPENAI_API_KEY no configurada' }, { status: 500 });
   }
+
+  const acceptLanguage = request.headers.get('accept-language') ?? undefined;
+  const language = getPreferredTranscriptionLanguage(acceptLanguage);
 
   try {
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
@@ -15,7 +18,7 @@ export async function POST() {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        session: buildTranscriptionSession()
+        session: buildTranscriptionSession(language)
       })
     });
 
